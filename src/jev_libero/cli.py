@@ -34,7 +34,7 @@ def main(argv=None):
     live.add_argument(
         "--no-render", action="store_true", help="Save controls/state, but no GIF or camera frames"
     )
-    live.add_argument("--provider", choices=("openrouter", "typesafe"), default="openrouter")
+    live.add_argument("--provider", choices=("openrouter", "typesafe", "bxi"), default="openrouter")
     live.add_argument(
         "--api-key-file",
         type=Path,

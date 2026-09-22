@@ -1,4 +1,4 @@
-"""Jev decisions through OpenRouter or the official TypeSafe API."""
+"""Jev decisions through OpenRouter, TypeSafe, or the BXI Responses gateway."""
 
 import json
 import os
@@ -12,6 +12,7 @@ MODEL = "typesafe/jev-1.13"
 PROVIDERS = {
     "openrouter": (ENDPOINT, MODEL, "OPENROUTER"),
     "typesafe": ("https://api.typesafe.ai/v1/systemone", "jev-latest", "TYPESAFE"),
+    "bxi": (os.environ["BXI_BASE_URL"], os.environ.get("BXI_MODEL", "gpt-5.6-sol"), "BXI"),
 }
 # Official published price: https://typesafe.ai ($42/billion input tokens).
 TYPESAFE_INPUT_USD_PER_MILLION = 0.042
@@ -64,6 +65,13 @@ class Decisions:
                 layer: {"type": "choice", "instructions": instructions, "criteria": criteria}
             },
         }
+        if self.provider == "bxi":
+            body = {"model": self.model, "stream": True, "input": [{"role": "user", "content": [{
+                "type": "input_text",
+                "text": ("Return JSON only as {\\\"choice\\\":\\\"...\\\"}. "
+                         f"The choice must be one of: {list(criteria)}. Instructions: {instructions}. "
+                         f"State: {json.dumps(state, ensure_ascii=False)}"),
+            }]}]}
         for attempt in range(2):
             start = time.perf_counter()
             try:
@@ -85,7 +93,7 @@ class Decisions:
                 time.sleep(2)
         elapsed = time.perf_counter() - start
         try:
-            result = response.json()
+            result = self._parse_response(response, layer) if self.provider == "bxi" else response.json()
         except ValueError:
             append_json(
                 self.out / "api.jsonl",
@@ -124,6 +132,8 @@ class Decisions:
                     "input_usd_per_million": TYPESAFE_INPUT_USD_PER_MILLION,
                 },
             )
+        elif self.provider == "bxi":
+            cost = result["usage"]["total_tokens"] * TYPESAFE_INPUT_USD_PER_MILLION / 1_000_000
         else:
             cost = result["usage"]["cost"]
         self.total += cost
@@ -132,6 +142,25 @@ class Decisions:
         if choice not in criteria:
             raise ValueError(f"Invalid {layer} choice returned: {choice}")
         return choice
+
+    @staticmethod
+    def _parse_response(response, layer):
+        text, usage = "", {"total_tokens": 0}
+        for line in response.text.splitlines():
+            if not line.startswith("data: "):
+                continue
+            event = json.loads(line[6:])
+            if event.get("type") == "response.output_text.delta":
+                text += event.get("delta", "")
+            elif event.get("type") == "response.completed":
+                usage = event.get("response", {}).get("usage", usage) or usage
+            elif event.get("type") == "error":
+                raise RuntimeError(event.get("error", {}).get("message", "BXI response failed"))
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"BXI returned non-JSON choice for {layer}: {text!r}") from exc
+        return {"answers": {layer: {"choice": payload.get("choice")}}, "usage": usage}
 
     def close(self):
         self.session.close()

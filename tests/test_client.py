@@ -33,6 +33,23 @@ class Session:
         pass
 
 
+class BxiResponse:
+    status_code = 200
+    text = ('event: response.output_text.delta\n'
+            'data: {"type":"response.output_text.delta","delta":"{\\"choice\\":\\"hold\\"}"}\n\n'
+            'event: response.completed\n'
+            'data: {"type":"response.completed","response":{"usage":{"total_tokens":12}}}\n\n')
+
+    def raise_for_status(self):
+        pass
+
+
+class BxiSession(Session):
+    def post(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        return BxiResponse()
+
+
 def test_request_logging_and_no_credential_leak(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-only-secret-not-a-real-key")
     session = Session()
@@ -112,3 +129,13 @@ def test_provider_credentials_are_not_mixed(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENROUTER_API_KEY", "router-test-key")
     with pytest.raises(ValueError, match="TYPESAFE_API_KEY"):
         Decisions(tmp_path, provider="typesafe", session=Session())
+
+
+def test_bxi_stream_response_is_parsed(monkeypatch, tmp_path):
+    monkeypatch.setenv("BXI_API_KEY", "bxi-test-key")
+    api = Decisions(tmp_path, provider="bxi", session=BxiSession(), model="gpt-5.6-sol")
+    assert api.choose(0, "motor", {}, "Choose.", {"hold": "stay"}) == "hold"
+    call = api.session.calls[0]
+    assert call[0] == "https://ai.bxirobotics.cn/v1/responses"
+    assert call[1]["json"]["stream"] is True
+    assert api.total == pytest.approx(0.000000504)

@@ -109,6 +109,22 @@ jev-libero run --provider openrouter --task microwave --seed 1 \
 
 Both routes use the same control pipeline. TypeSafe calls `/v1/systemone` with `jev-latest`; OpenRouter uses `typesafe/jev-1.13` and is the CLI default.
 
+**OpenAI-compatible gateway / relay**
+
+This fork also includes a small streaming adapter for gateways that expose an OpenAI Responses-compatible endpoint. The gateway URL, model name, and credential are supplied at runtime through environment variables; they are not stored in the repository.
+
+```bash
+export BXI_BASE_URL="https://your-gateway.example/v1/responses"
+export BXI_MODEL="gpt-5.6-sol"
+export BXI_API_KEY_FILE=/path/to/private/gateway.key
+# Or set BXI_API_KEY in the environment.
+
+jev-libero run --provider bxi --task top_drawer --seed 1 \
+  --out runs/gateway-drawer-s1 --max-decisions 40 --budget-usd 0.10
+```
+
+The adapter expects a streaming Responses API (`stream: true`) and converts the model's JSON choice back into Jev's layered decision format. The gateway must return text that contains a choice such as `{"choice":"..."}`. Use a new output directory for every run. Gateway availability, model limits, and usage pricing are controlled by the gateway provider.
+
 Choose a new output directory for each episode. `--max-decisions` bounds its length, and `--budget-usd` sets a client-side spending guard. Runs use paid API calls: OpenRouter reports costs directly; TypeSafe costs are estimated from token usage. [API setup and billing details →](docs/setup.md#official-api)
 
 ## Configure your own task
